@@ -1,0 +1,51 @@
+name: Publish web preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Download and verify exported website
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess, zipfile
+          manifest=json.loads(pathlib.Path('release.json').read_text())
+          download=pathlib.Path(os.environ['RUNNER_TEMP'])/'voyager-preview'
+          download.mkdir()
+          subprocess.run(['gh','release','download',manifest['tag'],'--repo',os.environ['GITHUB_REPOSITORY'],'--pattern',manifest['asset'],'--dir',str(download)],check=True)
+          archive=download/manifest['asset']
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==manifest['sha256'],'Preview archive checksum mismatch'
+          destination=pathlib.Path('_site').resolve()
+          destination.mkdir()
+          with zipfile.ZipFile(archive) as z:
+              for entry in z.infolist():
+                  target=(destination/entry.filename).resolve()
+                  if destination not in target.parents:raise ValueError('Unexpected archive path')
+                  if entry.filename.endswith(('.gd','.tscn','.godot','.blend')):raise ValueError('Project source in preview archive')
+              z.extractall(destination)
+          assert (destination/'index.html').is_file()
+          assert (destination/'index.pck').is_file()
+          assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<1024**3
+          print('Verified exported website',manifest['source_version'])
+          PY
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+          retention-days: 1
+      - uses: actions/deploy-pages@v4
+        id: deployment
