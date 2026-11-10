@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os, pathlib, subprocess, zipfile
+          import hashlib, json, os, pathlib, re, subprocess, zipfile
           manifest=json.loads(pathlib.Path('release.json').read_text())
           download=pathlib.Path(os.environ['RUNNER_TEMP'])/'voyager-preview'
           download.mkdir()
@@ -39,7 +39,11 @@ jobs:
                   if entry.filename.endswith(('.gd','.tscn','.godot','.blend')):raise ValueError('Project source in preview archive')
               z.extractall(destination)
           assert (destination/'index.html').is_file()
-          assert (destination/'index.pck').is_file()
+          build=json.loads((destination/'build-info.json').read_text())
+          pack=build.get('main_pack','index.pck')
+          assert re.fullmatch(r'(?:index|game-[0-9a-f]{16})\.pck',pack)
+          assert (destination/pack).is_file()
+          assert (destination/pack).stat().st_size==build['files'][pack]
           assert sum(p.stat().st_size for p in destination.rglob('*') if p.is_file())<1024**3
           print('Verified exported website',manifest['source_version'])
           PY
